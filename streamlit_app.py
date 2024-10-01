@@ -12,6 +12,7 @@ def images_to_text():
     uploaded_images = st.file_uploader("Upload multiple images", accept_multiple_files=True)
 
     if uploaded_images:
+        uploaded_images.sort(key=lambda x: x.name)
         st.write("Images uploaded:")
         cols = st.columns(3)
         
@@ -32,11 +33,12 @@ def images_to_text():
 
 def text_to_vocabulary():
     st.title("Create vocabulary from text")
+    title = st.text_input("Document Title", value="Vocabulary")
     uploaded_doc = st.file_uploader("Upload a Word document")
     if uploaded_doc and st.session_state.get('text_to_vocabulary_doc') != uploaded_doc:
         output_doc = io.BytesIO()
         st.write("Building vocabulary...")
-        word_ocr.gen_vocabulary_doc(uploaded_doc, output_doc)
+        word_ocr.gen_vocabulary_doc(uploaded_doc, output_doc, title)
         st.session_state['text_to_vocabulary_doc'] = uploaded_doc
         st.download_button(
             label="Download Vocabulary Document",

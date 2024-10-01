@@ -2,3 +2,6 @@ streamlit
 python-docx
 openai
 joblib
+pytesseract
+Pillow
+opencv-python
