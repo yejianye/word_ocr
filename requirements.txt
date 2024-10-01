@@ -4,4 +4,4 @@ openai
 joblib
 pytesseract
 Pillow
-opencv-python
+opencv-python-headless
