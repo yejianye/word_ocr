@@ -153,11 +153,9 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200,
                 merged_words[-1] += ' ' + hl_words[i]['text']
             else:
                 merged_words.append(hl_words[i]['text'])
-    return {'full_text': result['full_text'], 'highlighted_words': merged_words}
+    return {'full_text': result['full_text'], 'highlighted_words': merged_words, 'image': processed_image}
 
-def hightlighted_words_to_vocabulary(words, article, output_file, title="Vocabulary"):
-    vocabulary = create_vocabulary(words, article)
-
+def vocabulary_to_doc(vocabulary, output_file, title="Vocabulary"):
     output_doc = Document("template.docx")
     title_paragraph = output_doc.paragraphs[0]
     title_paragraph.text = title  # Set the text of the paragraph directly
@@ -391,7 +389,8 @@ def test_hightlighted_words_to_vocabulary():
     print(result['highlighted_words'])
     print("=== Full Text ===")
     print(result['full_text'])
-    hightlighted_words_to_vocabulary(result['highlighted_words'], result['full_text'], "test_vocabulary.docx")
+    vocabulary = create_vocabulary(result['highlighted_words'], result['full_text'])
+    vocabulary_to_doc(vocabulary, "test_vocabulary.docx")
 
 if __name__ == "__main__":
     # test_extract_text_from_image()
