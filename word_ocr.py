@@ -4,6 +4,11 @@ import base64
 import hashlib
 import io
 from pprint import pprint
+
+import cv2
+import boto3
+import numpy as np
+
 from docx import Document
 from docx.shared import RGBColor, Pt
 from openai import OpenAI
@@ -61,35 +66,137 @@ def generate_file_hash(file_or_bytesio):
     
     return md5_hash.hexdigest()[:16]
 
-def extract_highlighted_words_from_image(image_path_or_file):
-    prompt = """
-# 任务描述
-1. 从图片中提取所有的被荧光笔标记的文本块
-2. 根据以下条件对在第1步找到的文本块进行筛选
-   a. 去掉有下划线或是粗体，但未被荧光笔高亮的文本块
-   b. 去掉文字本身不是黑色，但背景未被高亮的文本块
-   c. 去掉包含单词数量超过3个的文本块
-3. 对于第2步中筛选出来的文本块，按要求输出
+def find_highlighted_regions(image_path_or_image, region_min_size=200, output_path=None):
+    if isinstance(image_path_or_image, str):
+        image = cv2.imread(image_path_or_image)
+    else:
+        image = image_path_or_image
 
-# 输出要求
-- 每个文本块输出为一行
-- 文本块中字母的大小写与图中保持一致
-- 文本块的输出顺序与图中保持一致，按从上到下，从左到右的顺序输出。对于双栏布局的图片，先输出左栏，再输出右栏。
-- 每一行除了文本块以外，不包含其他任何内容，如序号、列表标记等
-- 除上述要求外，不要输出任何其他内容，如解释、注释等
+    # Convert the image to HSV color space for better color segmentation
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-# 输出示例
-apple
-orange
-shuttle bus
+    # Define the range for orange highlights in HSV
+    orange_lower = np.array([10, 80, 100], dtype=np.uint8)
+    orange_upper = np.array([60, 255, 255], dtype=np.uint8)
 
-"""
+    # Create masks for orange and yellow regions
+    orange_mask = cv2.inRange(hsv_image, orange_lower, orange_upper)
+
+    # Find contours of the highlighted regions
+    contours, _ = cv2.findContours(orange_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Draw bounding boxes around the highlighted regions
+    regions = []
+    for contour in contours:
+        # Get the bounding box for each contour
+        x, y, w, h = cv2.boundingRect(contour)
+        # Draw a rectangle around the highlighted area
+        if w * h > region_min_size:
+            regions.append((x, y, w, h))
+            if output_path:
+                cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    if output_path:
+        cv2.imshow('Highlighted Regions', image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        cv2.imwrite(output_path, image)
+
+    return regions
+
+def intersect_area(x1, y1, w1, h1, x2, y2, w2, h2):
+    x_overlap = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
+    y_overlap = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
+    return x_overlap * y_overlap
+
+def sanitize_text(text):
+    # Use regex to extract only alphabets and hyphens from the text
+    return re.search(r'[a-zA-Z- ]+', text).group().strip()
+
+
+def get_text_with_textract(image_path_or_image):
+    if isinstance(image_path_or_image, str):
+        image = cv2.imread(image_path_or_image)
+    else:
+        image = image_path_or_image
+
+    height, width = image.shape[:2]
+    _, image_data = cv2.imencode(".jpg", image_path_or_image)
+    image_bytes = image_data.tobytes()
+
+    textract = boto3.client('textract')
+    response = textract.detect_document_text(
+        Document={'Bytes': image_bytes}
+    )
+    # Process each detected block
+    result = []
+    idx = 0
+    for block in response['Blocks']:
+        if block['BlockType'] == 'WORD':  # Get bounding boxes for words only
+            text = block['Text']
+            bounding_box = block['Geometry']['BoundingBox']
+            bounding_box = (
+                int(bounding_box['Left'] * width),
+                int(bounding_box['Top'] * height),
+                int(bounding_box['Width'] * width),
+                int(bounding_box['Height'] * height)
+            )
+            confidence = block['Confidence'] / 100
+            result.append({
+                'text': text,
+                'idx': idx,
+                'confidence': confidence,
+                'bounding_box': bounding_box
+            })
+            idx += 1
+    return result
+
+def preprocess_image(image_path_or_file):
     image_hash = generate_file_hash(image_path_or_file)
     processed_image = f"/tmp/img_{image_hash}.jpg"
     imgutil.preprocess_image(image_path_or_file, processed_image)
-    result = llm_image_completion(processed_image, prompt)
-    words = [w.strip() for w in result.strip().split('\n') if w.strip()]
-    return words
+    return processed_image
+
+def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200, debug=False):
+    processed_image = preprocess_image(image_path_or_file)
+    # Load the image using OpenCV
+    image = cv2.imread(processed_image)
+    hl_regions = find_highlighted_regions(processed_image)
+    # Use pytesseract to get the bounding box information
+    data = get_text_with_textract(image)
+    # Loop over each detected word and its corresponding bounding box
+    hl_words = []
+    for word in data:
+        if word['confidence'] > 0.5:  # Filter out weakly confident text (optional)
+            (x, y, w, h) = word['bounding_box']
+            overlap_area = 0
+            for region in hl_regions:
+                rx, ry, rw, rh = region
+                overlap_area += intersect_area(x, y, w, h, rx, ry, rw, rh)
+            if overlap_area > area_threshold:
+                word['text'] = sanitize_text(word['text'])
+                hl_words.append(word)
+                print(f"Detected words: {word['text']} Confidence: {word['confidence']}")
+                if debug:
+                    cv2.rectangle(image, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+    # Display the image with bounding boxes
+    if debug:
+        cv2.imshow('Highlighted Words', image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    # merge adjacent words
+    merged_words = []
+    for i in range(len(hl_words)):
+        if i == 0:
+            merged_words.append(hl_words[i]['text'])
+        else:
+            if hl_words[i]['idx'] - hl_words[i-1]['idx'] == 1:
+                merged_words[-1] += ' ' + hl_words[i]['text']
+            else:
+                merged_words.append(hl_words[i]['text'])
+    return merged_words
 
 def extract_text_from_image(image_path_or_file):
 #     prompt = """
@@ -265,6 +372,11 @@ def test_images_to_doc():
 
 def test_gen_vocabulary_doc():
     gen_vocabulary_doc("test_markdown.docx", "test_vocabulary.docx", "Test Vocabulary")
+
+def test_find_highlighted_regions():
+    i = 6
+    imgutil.preprocess_image(f"tests/test{i}.jpg", f"tests/test{i}_processed.jpg")
+    find_highlighted_regions(f"tests/test{i}_processed.jpg", output_path=f"tests/test{i}_highlighted.jpg")
 
 def test_extract_highlighted_words_from_image():
     print(extract_highlighted_words_from_image("tests/test1.jpg"))
