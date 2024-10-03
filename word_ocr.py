@@ -15,57 +15,15 @@ from openai import OpenAI
 from joblib import Memory
 
 import imgutil
+from util import llm_completion, llm_image_completion, cache, generate_file_hash
+# ==== COMMON ====
+def preprocess_image(image_path_or_file):
+    image_hash = generate_file_hash(image_path_or_file)
+    processed_image = f"/tmp/img_{image_hash}.jpg"
+    imgutil.preprocess_image(image_path_or_file, processed_image)
+    return processed_image
 
-DEFAULT_MODEL = 'gpt-4o-2024-08-06'
-
-mem = Memory(location=os.getenv('JOBLIB_CACHE_DIR'), verbose=0)
-@mem.cache
-def llm_completion(prompt):
-    client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-    resp = client.chat.completions.create(
-        model=DEFAULT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.choices[0].message.content
-
-@mem.cache
-def llm_image_completion(image_file_or_path, prompt):
-    client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-    if isinstance(image_file_or_path, str): 
-        with open(image_file_or_path, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-    else:
-        encoded_string = base64.b64encode(image_file_or_path.read()).decode('utf-8')
-
-    resp = client.chat.completions.create(
-        model=DEFAULT_MODEL,
-        messages=[{"role": "system", 
-                   "content": "You are a helpful assistant that extract text from English textbook images."},
-                {"role": "user", "content": [
-                    {"type": "text", "text": prompt}, 
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_string}"}}]}]
-    )
-    return resp.choices[0].message.content
-
-def generate_file_hash(file_or_bytesio):
-    md5_hash = hashlib.md5()
-    
-    if isinstance(file_or_bytesio, str):
-        # If it's a string, assume it's a file path
-        with open(file_or_bytesio, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                md5_hash.update(chunk)
-    elif isinstance(file_or_bytesio, io.BytesIO):
-        # If it's a BytesIO object, read its content
-        file_or_bytesio.seek(0)
-        for chunk in iter(lambda: file_or_bytesio.read(4096), b""):
-            md5_hash.update(chunk)
-        file_or_bytesio.seek(0)  # Reset the BytesIO position
-    else:
-        raise ValueError("Input must be either a file path string or a BytesIO object")
-    
-    return md5_hash.hexdigest()[:16]
-
+# ==== OCR with Textract ====
 def find_highlighted_regions(image_path_or_image, region_min_size=200, output_path=None):
     if isinstance(image_path_or_image, str):
         image = cv2.imread(image_path_or_image)
@@ -114,7 +72,7 @@ def sanitize_text(text):
     return re.search(r'[a-zA-Z- ]+', text).group().strip()
 
 
-@mem.cache
+@cache
 def get_text_with_textract(image_path_or_image):
     if isinstance(image_path_or_image, str):
         image = cv2.imread(image_path_or_image)
@@ -154,12 +112,6 @@ def get_text_with_textract(image_path_or_image):
             })
             idx += 1
     return {'full_text': full_text, 'words': words}
-
-def preprocess_image(image_path_or_file):
-    image_hash = generate_file_hash(image_path_or_file)
-    processed_image = f"/tmp/img_{image_hash}.jpg"
-    imgutil.preprocess_image(image_path_or_file, processed_image)
-    return processed_image
 
 def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200, debug=False):
     processed_image = preprocess_image(image_path_or_file)
@@ -201,8 +153,19 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200,
                 merged_words[-1] += ' ' + hl_words[i]['text']
             else:
                 merged_words.append(hl_words[i]['text'])
-    return merged_words
+    return {'full_text': result['full_text'], 'highlighted_words': merged_words}
 
+def hightlighted_words_to_vocabulary(words, article, output_file, title="Vocabulary"):
+    vocabulary = create_vocabulary(words, article)
+
+    output_doc = Document("template.docx")
+    title_paragraph = output_doc.paragraphs[0]
+    title_paragraph.text = title  # Set the text of the paragraph directly
+    title_paragraph.runs[0].font.size = Pt(16)  # Set font size to 16 points
+    add_vocabulary_table(output_doc, vocabulary, title)
+    output_doc.save(output_file)
+
+# ==== OCR with LLM ====
 def extract_text_from_image(image_path_or_file):
 #     prompt = """
 # # 任务描述
@@ -246,9 +209,7 @@ Highlighted text:
 - Before the final output, compare it with the original image again to ensure that the boldness of the highlighted text meets the requirements; 
   otherwise, adjustments need to be made. For example, text with underline should not be bold.
 """
-    image_hash = generate_file_hash(image_path_or_file)
-    processed_image = f"/tmp/img_{image_hash}.jpg"
-    imgutil.preprocess_image(image_path_or_file, processed_image)
+    processed_image = preprocess_image(image_path_or_file)
     result = llm_image_completion(processed_image, prompt)
 
     if len(result) < 100: # retry if the result is not valid
@@ -295,7 +256,7 @@ def doc_to_markdown(doc):
         paragraphs.append(' '.join(text).strip())
     return '\n\n'.join(paragraphs)
 
-def create_vocabulary(article):
+def create_vocabulary_from_markdown(article):
     prompt = f"""
     在 ARTICLE 中提取加粗的单词或是词组，并在 ARTICLE 的上下文语境中翻译。每个单词输出一行，格式为
     单词 | 音标 | 词性 | 中文翻译
@@ -328,6 +289,43 @@ def create_vocabulary(article):
     result = [[j.strip() for j in i.split('|')] for i in result]
     return result
 
+def create_vocabulary(words, article):
+    words = '\n'.join(words)
+    prompt = f"""
+    对于 WORDS 中每一行的单词或短语，在 ARTICLE 的上下文语境中翻译。每个翻译输出一行，格式为
+    单词 | 音标 | 词性 | 中文翻译
+
+    - 如果单词是动词，则将其转化为动词原形后再翻译输出。例如，加粗的单词为动词lingered，则转成linger。
+    - 如果单词是名词，则将其转化为名词单数形式后再翻译输出。例如，加粗的单词为名词tables，则转成table。
+    - 如果是一个短语，则音标与词性可以为空，但 | 不能省略。
+    - 音标左右两边需要用 / 来包裹。
+    - 如果一个单词在之前已出现过，则跳过该单词不再输出。
+    - 单词默认采用小写；专有名词首字母大写。
+    - 单词前不需要加序号。
+    - 除了上述要求的输出格式以外，不要输出任何其他内容。
+    - 在最终输出前，再次检查每个输出的单词或短语，确保符合上述要求，否则进行调整。例如检查是存在动词过去式、名词复数、单词音标或是词性缺失等不符合要求的情况。
+
+    # EXAMPLE
+    正确的输出：
+    lurch | /lɜːrtʃ/ | v. | 突然倾斜
+
+    错误的输出：
+    stranded | /ˈstrændɪd/ | v. | 搁浅
+    错误原因：动词没有输出为原形，而是输出了动词的过去式。
+
+    # WORDS
+    {words}
+
+    # ARTICLE 
+    ```
+    {article}
+    ```
+    """
+    result = llm_completion(prompt).strip("```")
+    result = [l.strip() for l in result.split('\n') if l.strip()]
+    result = [[j.strip() for j in i.split('|')] for i in result]
+    return result
+
 def add_vocabulary_table(doc, vocabulary, title):
     table = doc.tables[0]
 
@@ -337,10 +335,10 @@ def add_vocabulary_table(doc, vocabulary, title):
         for j, cell in enumerate(row.cells):
             cell.text = word[j] if j < len(word) else ""
 
-def gen_vocabulary_doc(input_file, output_file, title="Vocabulary"):
+def doc_to_vocabulary(input_file, output_file, title="Vocabulary"):
     doc = Document(input_file)
     md_text = doc_to_markdown(doc)
-    vocabulary = create_vocabulary(md_text)
+    vocabulary = create_vocabulary_from_markdown(md_text)
 
     output_doc = Document("template.docx")
     title_paragraph = output_doc.paragraphs[0]
@@ -349,7 +347,7 @@ def gen_vocabulary_doc(input_file, output_file, title="Vocabulary"):
     add_vocabulary_table(output_doc, vocabulary, title)
     output_doc.save(output_file)
 
-### TESTS ###
+### TESTS LLM ###
 def test_convert_markdown_to_docx():
     test_markdown = """
 Brenda Z. Guiberson wanted to be a jungle explorer when she was a child. Much of her childhood was spent swimming, watching birds and __salmon__, and searching for arrowheads near her home along the Columbia River in the state of Washington. After volunteering at her child’s school, Guiberson became interested in writing nature books for children. She says that she writes for the child in herself, the one who loves adventure, surprises, and learning new things—a jungle explorer in words.
@@ -375,9 +373,10 @@ def test_extract_text_from_image():
 def test_images_to_doc():
     images_to_doc(["/Users/ryan/Downloads/IMG_5292.jpg"], "test_markdown.docx")
 
-def test_gen_vocabulary_doc():
-    gen_vocabulary_doc("test_markdown.docx", "test_vocabulary.docx", "Test Vocabulary")
+def test_doc_to_vocabulary():
+    doc_to_vocabulary("test_markdown.docx", "test_vocabulary.docx", "Test Vocabulary")
 
+### TESTS Textract ###
 def test_find_highlighted_regions():
     i = 6
     imgutil.preprocess_image(f"tests/test{i}.jpg", f"tests/test{i}_processed.jpg")
@@ -386,9 +385,18 @@ def test_find_highlighted_regions():
 def test_extract_highlighted_words_from_image():
     print(extract_highlighted_words_from_image("tests/test1.jpg"))
 
+def test_hightlighted_words_to_vocabulary():
+    result = extract_highlighted_words_from_image("tests/test1.jpg")
+    print("=== Highlighted Words ===")
+    print(result['highlighted_words'])
+    print("=== Full Text ===")
+    print(result['full_text'])
+    hightlighted_words_to_vocabulary(result['highlighted_words'], result['full_text'], "test_vocabulary.docx")
+
 if __name__ == "__main__":
     # test_extract_text_from_image()
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
     # test_gen_vocabulary_doc()
-    test_extract_highlighted_words_from_image()
+    # test_extract_highlighted_words_from_image()
+    test_hightlighted_words_to_vocabulary()
