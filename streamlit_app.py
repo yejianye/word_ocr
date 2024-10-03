@@ -89,10 +89,10 @@ class AppState:
         vocabulary = []
         for i in range(len(self.uploaded_images)):
             vocabulary += self.vocabulary_results[i]
-        output_doc = io.BytesIO()
-        word_ocr.vocabulary_to_doc(vocabulary, output_doc, self.doc_title)
-        return vocabulary, output_doc
 
+        doc = io.BytesIO()
+        word_ocr.vocabulary_to_doc(vocabulary, doc, self.doc_title)
+        return vocabulary, doc
 
 def main():
     st.title("Create Vocabulary from Images")
@@ -116,12 +116,14 @@ def main():
             st.rerun()
 
     if stage == 'verify_ocr_results':
+        with st.spinner('Processing images...'):
+            ocr_result = app_state.get_current_ocr_result()
         image_idx = app_state.image_idx
-        ocr_result = app_state.get_current_ocr_result()
         image = ocr_result['debug_image']
         highlighted_words = app_state.highlighted_words.get(image_idx) or ocr_result['highlighted_words']
         print(f"highlighted_words: {highlighted_words}")
-        title =st.text_input("Enter Vocabulary Title", value="Vocabulary")
+        title = st.text_input("Vocabulary Title", placeholder="Enter Vocabulary Title")
+
         cols = st.columns([0.7, 0.3])
         with cols[0]:
             st.image(image, caption=f"Image {image_idx+1}", use_column_width=True)
@@ -142,13 +144,13 @@ def main():
             if image_idx == len(app_state.uploaded_images) - 1:
                 if st.button("Create Vocabulary", use_container_width=True, type="primary"):
                     app_state.update_highlighted_words(st.session_state['hl_textarea'])
-                    app_state.create_vocabulary_doc(title)
+                    app_state.create_vocabulary_doc(title or "Vocabulary")
                     st.rerun()
     
     if stage == 'create_vocabulary_doc':
         with st.spinner('Creating vocabulary document...'):
             vocabulary, doc = app_state.get_vocabulary_doc()
-        
+
         col1, col2 = st.columns(2)
         with col1:
             st.download_button(
@@ -171,6 +173,7 @@ def main():
             table_data.append(line)
         df = pd.DataFrame(table_data[1:], columns=table_data[0])
         df.index += 1  # Make index start with 1 instead of 0
+        st.subheader(app_state.doc_title)
         st.table(df)
 
 if __name__ == "__main__":
