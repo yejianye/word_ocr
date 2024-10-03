@@ -62,7 +62,9 @@ def find_highlighted_regions(image_path_or_image, region_min_size=200, output_pa
 
     return regions
 
-def intersect_area(x1, y1, w1, h1, x2, y2, w2, h2):
+def intersect_area(box1, box2):
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
     x_overlap = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
     y_overlap = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
     return x_overlap * y_overlap
@@ -113,11 +115,19 @@ def get_text_with_textract(image_path_or_image):
             idx += 1
     return {'full_text': full_text, 'words': words}
 
-def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200, debug=False):
+def merge_bounding_boxes(box1, box2):
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
+    x = min(x1, x2)
+    y = min(y1, y2)
+    w = max(x1 + w1, x2 + w2) - x
+    h = max(y1 + h1, y2 + h2) - y
+    return (x, y, w, h)
+
+def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200):
     processed_image = preprocess_image(image_path_or_file)
     # Load the image using OpenCV
-    if debug:
-        debug_image = cv2.imread(processed_image)
+    debug_image = cv2.imread(processed_image)
     hl_regions = find_highlighted_regions(processed_image)
     # Use pytesseract to get the bounding box information
     result = get_text_with_textract(processed_image)
@@ -125,35 +135,36 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200,
     hl_words = []
     for word in result['words']:
         if word['confidence'] > 0.5:  # Filter out weakly confident text (optional)
-            (x, y, w, h) = word['bounding_box']
             overlap_area = 0
             for region in hl_regions:
-                rx, ry, rw, rh = region
-                overlap_area += intersect_area(x, y, w, h, rx, ry, rw, rh)
+                overlap_area += intersect_area(word['bounding_box'], region)
             if overlap_area > area_threshold:
                 word['text'] = sanitize_text(word['text'])
                 hl_words.append(word)
                 print(f"Detected words: {word['text']} Confidence: {word['confidence']}")
-                if debug:
-                    cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
-
-    # Display the image with bounding boxes
-    if debug:
-        cv2.imshow('Highlighted Words', debug_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
 
     # merge adjacent words
     merged_words = []
+    bounding_boxes = []
     for i in range(len(hl_words)):
         if i == 0:
             merged_words.append(hl_words[i]['text'])
+            bounding_boxes.append(hl_words[i]['bounding_box'])
         else:
             if hl_words[i]['idx'] - hl_words[i-1]['idx'] == 1:
                 merged_words[-1] += ' ' + hl_words[i]['text']
+                bounding_boxes[-1] = merge_bounding_boxes(bounding_boxes[-1], hl_words[i]['bounding_box'])
             else:
                 merged_words.append(hl_words[i]['text'])
-    return {'full_text': result['full_text'], 'highlighted_words': merged_words, 'image': processed_image}
+                bounding_boxes.append(hl_words[i]['bounding_box'])
+
+    for box in bounding_boxes:
+        x, y, w, h = box
+        cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+    debug_image_path = processed_image.replace('.jpg', '_debug.jpg')
+    cv2.imwrite(debug_image_path, debug_image)
+    return {'full_text': result['full_text'], 'highlighted_words': merged_words, 'debug_image': debug_image_path}
 
 def vocabulary_to_doc(vocabulary, output_file, title="Vocabulary"):
     output_doc = Document("template.docx")

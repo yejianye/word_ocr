@@ -118,7 +118,7 @@ def main():
     if stage == 'verify_ocr_results':
         image_idx = app_state.image_idx
         ocr_result = app_state.get_current_ocr_result()
-        image = ocr_result['image']
+        image = ocr_result['debug_image']
         highlighted_words = app_state.highlighted_words.get(image_idx) or ocr_result['highlighted_words']
         print(f"highlighted_words: {highlighted_words}")
         title =st.text_input("Enter Vocabulary Title", value="Vocabulary")
@@ -140,7 +140,7 @@ def main():
                     app_state.next_image()
                     st.rerun()
             if image_idx == len(app_state.uploaded_images) - 1:
-                if st.button("Create Vocabulary Document", type="primary"):
+                if st.button("Create Vocabulary", use_container_width=True, type="primary"):
                     app_state.update_highlighted_words(st.session_state['hl_textarea'])
                     app_state.create_vocabulary_doc(title)
                     st.rerun()
