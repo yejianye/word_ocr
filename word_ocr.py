@@ -61,6 +61,35 @@ def generate_file_hash(file_or_bytesio):
     
     return md5_hash.hexdigest()[:16]
 
+def extract_highlighted_words_from_image(image_path_or_file):
+    prompt = """
+# 任务描述
+1. 从图片中提取所有的被荧光笔标记的文本块
+2. 根据以下条件对在第1步找到的文本块进行筛选
+   a. 去掉有下划线或是粗体，但未被荧光笔高亮的文本块
+   b. 去掉文字本身不是黑色，但背景未被高亮的文本块
+   c. 去掉包含单词数量超过3个的文本块
+3. 对于第2步中筛选出来的文本块，按要求输出
+
+# 输出要求
+- 每个文本块输出为一行
+- 文本块中字母的大小写与图中保持一致
+- 文本块的输出顺序与图中保持一致，按从上到下，从左到右的顺序输出。对于双栏布局的图片，先输出左栏，再输出右栏。
+- 每一行除了文本块以外，不包含其他任何内容，如序号、列表标记等
+- 除上述要求外，不要输出任何其他内容，如解释、注释等
+
+# 输出示例
+apple
+orange
+shuttle bus
+
+"""
+    image_hash = generate_file_hash(image_path_or_file)
+    processed_image = f"/tmp/img_{image_hash}.jpg"
+    imgutil.preprocess_image(image_path_or_file, processed_image)
+    result = llm_image_completion(processed_image, prompt)
+    words = [w.strip() for w in result.strip().split('\n') if w.strip()]
+    return words
 
 def extract_text_from_image(image_path_or_file):
 #     prompt = """
@@ -237,9 +266,12 @@ def test_images_to_doc():
 def test_gen_vocabulary_doc():
     gen_vocabulary_doc("test_markdown.docx", "test_vocabulary.docx", "Test Vocabulary")
 
+def test_extract_highlighted_words_from_image():
+    print(extract_highlighted_words_from_image("tests/test1.jpg"))
 
 if __name__ == "__main__":
     # test_extract_text_from_image()
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
-    test_gen_vocabulary_doc()
+    # test_gen_vocabulary_doc()
+    test_extract_highlighted_words_from_image()
