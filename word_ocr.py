@@ -114,6 +114,7 @@ def sanitize_text(text):
     return re.search(r'[a-zA-Z- ]+', text).group().strip()
 
 
+@mem.cache
 def get_text_with_textract(image_path_or_image):
     if isinstance(image_path_or_image, str):
         image = cv2.imread(image_path_or_image)
@@ -121,7 +122,7 @@ def get_text_with_textract(image_path_or_image):
         image = image_path_or_image
 
     height, width = image.shape[:2]
-    _, image_data = cv2.imencode(".jpg", image_path_or_image)
+    _, image_data = cv2.imencode(".jpg", image)
     image_bytes = image_data.tobytes()
 
     textract = boto3.client('textract')
@@ -129,9 +130,12 @@ def get_text_with_textract(image_path_or_image):
         Document={'Bytes': image_bytes}
     )
     # Process each detected block
-    result = []
+    words = []
+    full_text = ""
     idx = 0
     for block in response['Blocks']:
+        if block['BlockType'] == 'LINE':
+            full_text += block['Text'] + "\n"
         if block['BlockType'] == 'WORD':  # Get bounding boxes for words only
             text = block['Text']
             bounding_box = block['Geometry']['BoundingBox']
@@ -142,14 +146,14 @@ def get_text_with_textract(image_path_or_image):
                 int(bounding_box['Height'] * height)
             )
             confidence = block['Confidence'] / 100
-            result.append({
+            words.append({
                 'text': text,
                 'idx': idx,
                 'confidence': confidence,
                 'bounding_box': bounding_box
             })
             idx += 1
-    return result
+    return {'full_text': full_text, 'words': words}
 
 def preprocess_image(image_path_or_file):
     image_hash = generate_file_hash(image_path_or_file)
@@ -160,13 +164,14 @@ def preprocess_image(image_path_or_file):
 def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200, debug=False):
     processed_image = preprocess_image(image_path_or_file)
     # Load the image using OpenCV
-    image = cv2.imread(processed_image)
+    if debug:
+        debug_image = cv2.imread(processed_image)
     hl_regions = find_highlighted_regions(processed_image)
     # Use pytesseract to get the bounding box information
-    data = get_text_with_textract(image)
+    result = get_text_with_textract(processed_image)
     # Loop over each detected word and its corresponding bounding box
     hl_words = []
-    for word in data:
+    for word in result['words']:
         if word['confidence'] > 0.5:  # Filter out weakly confident text (optional)
             (x, y, w, h) = word['bounding_box']
             overlap_area = 0
@@ -178,11 +183,11 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200,
                 hl_words.append(word)
                 print(f"Detected words: {word['text']} Confidence: {word['confidence']}")
                 if debug:
-                    cv2.rectangle(image, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                    cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
     # Display the image with bounding boxes
     if debug:
-        cv2.imshow('Highlighted Words', image)
+        cv2.imshow('Highlighted Words', debug_image)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
