@@ -95,66 +95,71 @@ class AppState:
         return vocabulary, doc
 
 def main():
-    st.title("Create Vocabulary from Images")
+    st.set_page_config(page_title="创建单词本", layout="wide")
     app_state = st.session_state.setdefault('app_state', AppState())
     stage = app_state.stage
     print(f"====Rerun at {datetime.now()}=====")
     print(f"Stage: {stage}")
 
     if stage == 'upload_images':
-        uploaded_images = st.file_uploader("Upload multiple images", accept_multiple_files=True)
+        st.markdown("### 上传包含高亮单词的图片（可上传多张）")
+        uploaded_images = st.file_uploader("", accept_multiple_files=True, label_visibility="collapsed")
         if uploaded_images:
             uploaded_images.sort(key=lambda x: x.name)
-            st.write("Images uploaded:")
-            cols = st.columns(3)
-            
+            st.write("已上传的图片")
+            cols = st.columns(3)            
             for i, uploaded_image in enumerate(uploaded_images):
                 with cols[i % 3]:
                     st.image(uploaded_image, caption=f"Image {i + 1}", use_column_width=True)
-        if st.button("Extract Highlighted Words from Images", disabled=(len(uploaded_images) == 0)):
+        else:
+            st.write("图片样例")
+            st.image("image_sample.jpg", width=600)
+        if st.button("从图片中抽取高亮单词", disabled=(len(uploaded_images) == 0)):
             app_state.upload_images(uploaded_images)
             st.rerun()
 
     if stage == 'verify_ocr_results':
-        with st.spinner('Processing images...'):
+        with st.spinner('正在分析图片...'):
             ocr_result = app_state.get_current_ocr_result()
         image_idx = app_state.image_idx
         image = ocr_result['debug_image']
         highlighted_words = app_state.highlighted_words.get(image_idx) or ocr_result['highlighted_words']
         print(f"highlighted_words: {highlighted_words}")
-        title = st.text_input("Vocabulary Title", placeholder="Enter Vocabulary Title")
+        st.markdown("### 输入单词本标题")
+        title = st.text_input("", placeholder="请输入单词本的标题", label_visibility="collapsed")
 
-        cols = st.columns([0.7, 0.3])
+        st.markdown("### 编缉或添加单词短语（每行一个）")
+        cols = st.columns([0.6, 0.4])
         with cols[0]:
-            st.image(image, caption=f"Image {image_idx+1}", use_column_width=True)
+            st.image(image, caption=f"图片 {image_idx+1}", use_column_width=True)
         with cols[1]:
             height = len(highlighted_words) * 25 + 75
-            st.text_area("Highlighted Words", value='\n'.join(highlighted_words), height=height, key="hl_textarea")
+            st.text_area("", value='\n'.join(highlighted_words), height=height, key="hl_textarea", label_visibility="collapsed")
             button_col1, button_col2 = st.columns(2)
             with button_col1:
-                if st.button("Prev Page", key="prev_button", disabled=(image_idx == 0)):
+                if st.button("上一张图片", key="prev_button", disabled=(image_idx == 0)):
                     app_state.update_highlighted_words(st.session_state['hl_textarea'])
                     app_state.prev_image()
                     st.rerun()
             with button_col2:
-                if st.button("Next Page", key="next_button", disabled=(image_idx == len(app_state.uploaded_images) - 1)):
+                if st.button("下一张图片", key="next_button", disabled=(image_idx == len(app_state.uploaded_images) - 1)):
                     app_state.update_highlighted_words(st.session_state['hl_textarea'])
                     app_state.next_image()
                     st.rerun()
             if image_idx == len(app_state.uploaded_images) - 1:
-                if st.button("Create Vocabulary", use_container_width=True, type="primary"):
+                if st.button("创建单词本", use_container_width=True, type="primary"):
                     app_state.update_highlighted_words(st.session_state['hl_textarea'])
                     app_state.create_vocabulary_doc(title or "Vocabulary")
                     st.rerun()
     
     if stage == 'create_vocabulary_doc':
-        with st.spinner('Creating vocabulary document...'):
+        with st.spinner('正在创建单词本...'):
             vocabulary, doc = app_state.get_vocabulary_doc()
-
+        st.markdown("### 下载单词本")
         col1, col2 = st.columns(2)
         with col1:
             st.download_button(
-                label="Download Vocabulary Document",
+                label="下载 Word 格式的单词本",
                 data=doc.getvalue(),
                 file_name=f"{app_state.doc_title}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -162,7 +167,7 @@ def main():
                 type="primary"
             )
         with col2:
-            if st.button("Create Another Vocabulary Document", use_container_width=True, type="secondary"):
+            if st.button("创建另一个单词本", use_container_width=True, type="secondary"):
                 del st.session_state['app_state']
                 st.rerun()
 
