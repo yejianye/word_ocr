@@ -56,5 +56,35 @@ def generate_file_hash(file_or_bytesio):
     
     return md5_hash.hexdigest()[:16]
 
+def strip_format_quote(text):
+    """
+    Strip format quotes from a string, such as "```markdown ... ```" or "```plaintext ... ```"
+    
+    Args:
+    text (str): The input string that may contain format quotes
+    
+    Returns:
+    str: The input string with format quotes removed
+    """
+    # Remove leading and trailing whitespace
+    text = text.strip()
+    
+    # Check if the text starts and ends with format quotes
+    if text.startswith("```") and text.endswith("```"):
+        # Find the position of the first newline
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            # Remove the opening format quote and everything before the first newline
+            text = text[first_newline + 1:]
+        else:
+            # If there's no newline, just remove the opening format quote
+            text = text[3:]
+        
+        # Remove the closing format quote
+        text = text[:-3]
+    
+    # Remove any remaining leading or trailing whitespace
+    return text.strip()
+
 
 

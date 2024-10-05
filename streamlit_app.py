@@ -11,7 +11,12 @@ import word_ocr
 
 class AppState:
     def __init__(self):
-        self.stage = "upload_images"
+        self.stage = "upload_file"
+        self.flow = None
+
+class ImageAppState:
+    def __init__(self):
+        self.stage = "upload_file"
         self.uploaded_images = []
         self.image_idx = 0
         self.highlighted_words = {}
@@ -94,14 +99,10 @@ class AppState:
         word_ocr.vocabulary_to_doc(vocabulary, doc, self.doc_title)
         return vocabulary, doc
 
-def main():
-    st.set_page_config(page_title="创建单词本", layout="wide")
-    app_state = st.session_state.setdefault('app_state', AppState())
+def image_to_vocabulary(app_state):
     stage = app_state.stage
-    print(f"====Rerun at {datetime.now()}=====")
-    print(f"Stage: {stage}")
 
-    if stage == 'upload_images':
+    if stage == 'upload_file':
         st.markdown("### 上传包含高亮单词的图片（可上传多张）")
         uploaded_images = st.file_uploader("", accept_multiple_files=True, label_visibility="collapsed")
         if uploaded_images:
@@ -153,33 +154,104 @@ def main():
                     st.rerun()
     
     if stage == 'create_vocabulary_doc':
-        with st.spinner('正在创建单词本...'):
-            vocabulary, doc = app_state.get_vocabulary_doc()
-        st.markdown("### 下载单词本")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                label="下载 Word 格式的单词本",
-                data=doc.getvalue(),
-                file_name=f"{app_state.doc_title}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-                type="primary"
-            )
-        with col2:
-            if st.button("创建另一个单词本", use_container_width=True, type="secondary"):
-                del st.session_state['app_state']
-                st.rerun()
+        download_vocabulary_flow(app_state)
 
-        table_data = [["单词", "音标", "词性", "解释"]]
-        for line in vocabulary:
-            if len(line) < 4:
-                line += [''] * (4 - len(line))
-            table_data.append(line)
-        df = pd.DataFrame(table_data[1:], columns=table_data[0])
-        df.index += 1  # Make index start with 1 instead of 0
-        st.subheader(app_state.doc_title)
-        st.table(df)
+class DocAppState:
+    def __init__(self):
+        self.stage = "upload_file"
+
+    def upload_doc(self, uploaded_doc, title):
+        self.doc_title = title
+        self.uploaded_doc = uploaded_doc
+        self.stage = 'create_vocabulary_doc'
+
+    def get_vocabulary_doc(self):
+        output_doc = io.BytesIO()
+        vocabulary = word_ocr.doc_to_vocabulary(self.uploaded_doc, output_doc, title=self.doc_title)
+        return vocabulary, output_doc
+
+def doc_to_vocabulary(app_state):
+    stage = app_state.stage
+    if stage == 'upload_file':
+        st.markdown("### 上传包含高亮单词的 Word 文件")
+        uploaded_doc = st.file_uploader("", label_visibility="collapsed")
+        if not uploaded_doc:
+            st.write("文件样例")
+            st.image("doc_sample.jpg", width=600)
+        st.markdown("### 输入单词本标题")
+        title = st.text_input("Vocabulary Title", value="Vocabulary", placeholder="请输入单词本的标题", label_visibility="collapsed")
+        if st.button("根据文档中的高亮文本生成单词本", disabled=(not uploaded_doc or not title)):
+            with st.spinner('正在生成单词本...'):
+                app_state.upload_doc(uploaded_doc, title)
+                st.rerun()
+    if stage == 'create_vocabulary_doc':
+        download_vocabulary_flow(app_state)
+
+def download_vocabulary_flow(app_state):
+    with st.spinner('正在创建单词本...'):
+        vocabulary, doc = app_state.get_vocabulary_doc()
+    st.markdown("### 下载单词本")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            label="下载 Word 格式的单词本",
+            data=doc.getvalue(),
+            file_name=f"{app_state.doc_title}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+            type="primary"
+        )
+    with col2:
+        if st.button("创建另一个单词本", use_container_width=True, type="secondary"):
+            del st.session_state['app_state']
+            del st.session_state['img_app_state']
+            del st.session_state['doc_app_state']
+            st.session_state.flow = None
+            st.rerun()
+
+    table_data = [["单词", "音标", "词性", "解释"]]
+    for line in vocabulary:
+        if len(line) < 4:
+            line += [''] * (4 - len(line))
+        table_data.append(line)
+    df = pd.DataFrame(table_data[1:], columns=table_data[0])
+    df.index += 1  # Make index start with 1 instead of 0
+    st.subheader(app_state.doc_title)
+    st.table(df)
+
+def main():
+    st.set_page_config(page_title="创建单词本", layout="wide")
+    flow = st.session_state.get('flow') or None
+    if flow == "image_to_vocabulary":
+        app_state = st.session_state.setdefault('img_app_state', ImageAppState())
+    elif flow == "doc_to_vocabulary":
+        app_state = st.session_state.setdefault('doc_app_state', DocAppState())
+    else:
+        app_state = st.session_state.setdefault('app_state', AppState())
+
+    stage = app_state.stage
+    print(f"====Rerun at {datetime.now()}=====")
+    print(f"Stage: {stage}")
+
+    if stage == 'upload_file':
+        st.markdown("### 选择上传文件类型")
+        flow_type = st.radio(
+            "选择上传类型",
+            ("包含高亮单词的图片", "包含高亮单词的 Word 文件"),
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        if flow_type == "包含高亮单词的图片":
+            st.session_state.flow = "image_to_vocabulary"
+        elif flow_type == "包含高亮单词的 Word 文件":
+            st.session_state.flow = "doc_to_vocabulary"
+        if flow != st.session_state.flow:
+            st.rerun()
+
+    if flow == "image_to_vocabulary":
+        image_to_vocabulary(app_state)
+    elif flow == "doc_to_vocabulary":
+        doc_to_vocabulary(app_state)
 
 if __name__ == "__main__":
     main()

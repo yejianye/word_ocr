@@ -15,7 +15,7 @@ from openai import OpenAI
 from joblib import Memory
 
 import imgutil
-from util import llm_completion, llm_image_completion, cache, generate_file_hash
+from util import llm_completion, llm_image_completion, cache, generate_file_hash, strip_format_quote
 # ==== COMMON ====
 def preprocess_image(image_path_or_file):
     image_hash = generate_file_hash(image_path_or_file)
@@ -226,7 +226,7 @@ Highlighted text:
         if len(result) < 100: # retry failed
             image_name = image_path_or_file if isinstance(image_path_or_file, str) else image_path_or_file.name
             result = f"Unable to process image {image_path_or_file}"
-    return result.strip("```markdown").strip("```")
+    return strip_format_quote(result)
 
 def add_markdown_to_docx(doc, markdown_text):
     # Regex to find underlined text (in markdown, __text__)
@@ -293,10 +293,12 @@ def create_vocabulary_from_markdown(article):
     {article}
     ```
     """
-    result = llm_completion(prompt).strip("```")
+    result = llm_completion(prompt)
+    result = strip_format_quote(result)
     result = [l.strip() for l in result.split('\n') if l.strip()]
     result = [[j.strip() for j in i.split('|')] for i in result]
     return result
+
 
 def create_vocabulary(words, article):
     words = '\n'.join(words)
@@ -355,6 +357,7 @@ def doc_to_vocabulary(input_file, output_file, title="Vocabulary"):
     title_paragraph.runs[0].font.size = Pt(16)  # Set font size to 16 points
     add_vocabulary_table(output_doc, vocabulary, title)
     output_doc.save(output_file)
+    return vocabulary
 
 ### TESTS LLM ###
 def test_convert_markdown_to_docx():
@@ -383,7 +386,7 @@ def test_images_to_doc():
     images_to_doc(["/Users/ryan/Downloads/IMG_5292.jpg"], "test_markdown.docx")
 
 def test_doc_to_vocabulary():
-    doc_to_vocabulary("test_markdown.docx", "test_vocabulary.docx", "Test Vocabulary")
+    doc_to_vocabulary("test_doc_to_vocabulary.docx", "test_vocabulary.docx", "Test Vocabulary")
 
 ### TESTS Textract ###
 def test_find_highlighted_regions():
@@ -407,6 +410,6 @@ if __name__ == "__main__":
     # test_extract_text_from_image()
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
-    # test_gen_vocabulary_doc()
     # test_extract_highlighted_words_from_image()
-    test_hightlighted_words_to_vocabulary()
+    # test_hightlighted_words_to_vocabulary()
+    test_doc_to_vocabulary()
