@@ -59,7 +59,6 @@ def resize_image(image, max_size=2000):
 def fix_image_orientation(image):    
     # Run Tesseract to detect text orientation
     osd = pytesseract.image_to_osd(image)
-    
     # Extract the rotation angle from Tesseract's OSD (Orientation and Script Detection)
     rotation_angle = int(osd.split("\n")[2].split(":")[1].strip())
 
@@ -78,7 +77,10 @@ def fix_image_orientation(image):
 def preprocess_image(image_path_or_file, output_path_or_file):
     image = read_image(image_path_or_file)
     image = resize_image(image)
-    image = fix_image_orientation(image)
+    try:
+        image = fix_image_orientation(image)
+    except pytesseract.TesseractError as e:
+        print(f"Error detecting and fixing image orientation: {e}")
     write_image(image, output_path_or_file)
 
 def test_preprocess_image():
@@ -86,5 +88,11 @@ def test_preprocess_image():
     output_path = "/Users/ryan/Downloads/processed_image.jpg"
     preprocess_image(image_path, output_path)
 
+def test_image_to_osd():
+    image_path = "/Users/ryan/Downloads/IMG_5307.jpg"
+    image = read_image(image_path)
+    print(pytesseract.image_to_osd(image, config="-c min_characters_to_try=3"))
+
 if __name__ == "__main__":
-    test_preprocess_image()
+    # test_preprocess_image()
+    test_image_to_osd()
