@@ -71,7 +71,10 @@ def intersect_area(box1, box2):
 
 def sanitize_text(text):
     # Use regex to extract only alphabets and hyphens from the text
-    return re.search(r'[a-zA-Z- ]+', text).group().strip()
+    match = re.search(r'[a-zA-Z- ]+', text)
+    if match:
+        return match.group().strip()
+    return None
 
 
 @cache
@@ -138,7 +141,7 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200)
             overlap_area = 0
             for region in hl_regions:
                 overlap_area += intersect_area(word['bounding_box'], region)
-            if overlap_area > area_threshold:
+            if overlap_area > area_threshold and sanitize_text(word['text']):
                 word['text'] = sanitize_text(word['text'])
                 hl_words.append(word)
                 print(f"Detected words: {word['text']} Confidence: {word['confidence']}")
