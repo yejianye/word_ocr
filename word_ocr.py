@@ -118,14 +118,59 @@ def get_text_with_textract(image_path_or_image):
             idx += 1
     return {'full_text': full_text, 'words': words}
 
-def merge_bounding_boxes(box1, box2):
-    x1, y1, w1, h1 = box1
-    x2, y2, w2, h2 = box2
-    x = min(x1, x2)
-    y = min(y1, y2)
-    w = max(x1 + w1, x2 + w2) - x
-    h = max(y1 + h1, y2 + h2) - y
-    return (x, y, w, h)
+def merge_bounding_boxes(boxes):
+    if not boxes:
+        return None
+    if len(boxes) == 1:
+        return boxes[0]
+        
+    # Initialize with first box
+    x1, y1, w1, h1 = boxes[0]
+    min_x = x1
+    min_y = y1
+    max_x = x1 + w1
+    max_y = y1 + h1
+    
+    # Find min/max coordinates across all boxes
+    for box in boxes[1:]:
+        x, y, w, h = box
+        min_x = min(min_x, x)
+        min_y = min(min_y, y)
+        max_x = max(max_x, x + w)
+        max_y = max(max_y, y + h)
+    
+    # Calculate width and height of merged box
+    width = max_x - min_x
+    height = max_y - min_y
+    
+    return (min_x, min_y, width, height)
+
+def calculate_text_bounding_box(words, margin=20):
+    """
+    Calculate the merged bounding box for all words with a safety margin.
+    
+    Args:
+        words (list): List of word dictionaries containing bounding box information
+        margin (int, optional): Safety margin to add around the bounding box. Defaults to 20.
+    
+    Returns:
+        tuple: (x1, y1, x2, y2) coordinates of the expanded bounding box
+    """
+    text_bounding_box = merge_bounding_boxes([word['bounding_box'] for word in words])
+    return (
+        text_bounding_box[0] - margin,
+        text_bounding_box[1] - margin,
+        text_bounding_box[2] + margin,
+        text_bounding_box[3] + margin
+    )
+
+def filter_regions_outside_bounding_box(regions, bounding_box):
+    filtered_regions = []
+    for region in regions:
+        x, y, w, h = region
+        if x >= bounding_box[0] and y >= bounding_box[1] and x + w <= bounding_box[0] + bounding_box[2] and y + h <= bounding_box[1] + bounding_box[3]:
+            filtered_regions.append(region)
+    return filtered_regions
 
 def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200):
     processed_image = preprocess_image(image_path_or_file)
@@ -134,6 +179,9 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200)
     hl_regions = find_highlighted_regions(processed_image)
     # Use pytesseract to get the bounding box information
     result = get_text_with_textract(processed_image)
+    text_bounding_box = calculate_text_bounding_box(result['words'])
+    # Filter out highlighted regions that are not inside the text bounding box
+    hl_regions = filter_regions_outside_bounding_box(hl_regions, text_bounding_box)
     # Loop over each detected word and its corresponding bounding box
     hl_words = []
     for word in result['words']:
@@ -156,10 +204,14 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200)
         else:
             if hl_words[i]['idx'] - hl_words[i-1]['idx'] == 1:
                 merged_words[-1] += ' ' + hl_words[i]['text']
-                bounding_boxes[-1] = merge_bounding_boxes(bounding_boxes[-1], hl_words[i]['bounding_box'])
+                bounding_boxes[-1] = merge_bounding_boxes([bounding_boxes[-1], hl_words[i]['bounding_box']])
             else:
                 merged_words.append(hl_words[i]['text'])
                 bounding_boxes.append(hl_words[i]['bounding_box'])
+
+    # for box in hl_regions:
+    #     x, y, w, h = box
+    #     cv2.rectangle(debug_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     for box in bounding_boxes:
         x, y, w, h = box
@@ -191,7 +243,7 @@ def extract_text_from_image(image_path_or_file):
 # # 输出要求
 # - 输出文本的换行与图中保持一致。
 # - 对于高亮文本进行加粗（左右两边各添加两个星号)。
-# - 如果高亮文本中包含逗号或是句号，则将标点符号两边的单词短语分别进行加粗。
+# - 如果高亮文��中包含逗号或是句号，则将标点符号两边的单词短语分别进行加粗。
 # - 对于其他文本，按原文输出，不添加任何标记。
 # - 不要输出除此以外的任何其他内容，如解释、注释等
 # - 在最终输出前，再次与原图进行比对，确保高亮文本的加粗符合要求，否则需要进行调整。例如：下划线的文本不应该加粗。
@@ -306,7 +358,7 @@ def create_vocabulary_from_markdown(article):
 def create_vocabulary(words, article):
     words = '\n'.join(words)
     prompt = f"""
-    对于 WORDS 中每一行的单词或短语，在 ARTICLE 的上下文语境中翻译。每个翻译输出一行，格式为
+    对于 WORDS 中每一行的单词或短语，在 ARTICLE 的���下文语境中翻译。每个翻译输出一行，格式为
     单词 | 音标 | 词性 | 中文翻译
 
     - 如果单词是动词，则将其转化为动词原形后再翻译输出。例如，加粗的单词为动词lingered，则转成linger。
@@ -398,7 +450,12 @@ def test_find_highlighted_regions():
     find_highlighted_regions(f"tests/test{i}_processed.jpg", output_path=f"tests/test{i}_highlighted.jpg")
 
 def test_extract_highlighted_words_from_image():
-    print(extract_highlighted_words_from_image("tests/test1.jpg"))
+    result = extract_highlighted_words_from_image("tests/walter2.jpg")
+    print(result['highlighted_words'])
+    debug_image = cv2.imread(result['debug_image'])
+    cv2.imshow('Debug Image', debug_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 def test_hightlighted_words_to_vocabulary():
     result = extract_highlighted_words_from_image("tests/test1.jpg")
@@ -413,6 +470,6 @@ if __name__ == "__main__":
     # test_extract_text_from_image()
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
-    # test_extract_highlighted_words_from_image()
+    test_extract_highlighted_words_from_image()
     # test_hightlighted_words_to_vocabulary()
-    test_doc_to_vocabulary()
+    # test_doc_to_vocabulary()
