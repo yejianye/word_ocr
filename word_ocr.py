@@ -4,6 +4,8 @@ import base64
 import hashlib
 import io
 from pprint import pprint
+from textwrap import dedent
+
 
 import cv2
 import boto3
@@ -320,9 +322,17 @@ def doc_to_markdown(doc):
         paragraphs.append(' '.join(text).strip())
     return '\n\n'.join(paragraphs)
 
-def create_vocabulary_from_markdown(article):
-    prompt = f"""
-    在 ARTICLE 中提取加粗的单词或是词组，并在 ARTICLE 的上下文语境中翻译。每个单词输出一行，格式为
+def doc_to_word_group(doc):
+    word_groups = []
+    for para in doc.paragraphs:
+        words = [run.text for run in para.runs if run.font.highlight_color]
+        if len(words) > 0:
+            word_groups.append({"words": words, "paragraph": para.text})
+    return word_groups
+
+def create_vocabulary_from_word_groups(word_groups):
+    prompt = dedent(f"""
+    对于所有 VOCABULARY 里的单词与短语，在对应的 PARAGRAPH 的上下文语境中翻译。每个单词输出一行，格式为
     单词 | 音标 | 词性 | 中文翻译
 
     - 如果加粗的单词是动词，则将其转化为动词原形后再翻译输出。例如，加粗的单词为动词lingered，则转成linger。
@@ -342,22 +352,29 @@ def create_vocabulary_from_markdown(article):
     stranded | /ˈstrændɪd/ | v. | 搁浅
     错误原因：动词没有输出为原形，而是输出了动词的过去式。
 
-    # ARTICLE 
-    ```markdown
-    {article}
-    ```
-    """
-    result = llm_completion(prompt)
+    """)
+    group_prompt = ""
+    for idx, group in enumerate(word_groups):
+        words = '\n'.join(group['words'])
+        group_prompt += dedent(f"""
+    --------------------
+    # VOCABULARY {idx+1}
+    {words}
+
+    # PARAGRAPH {idx+1}
+    {group['paragraph']}
+
+    """)
+    result = llm_completion(prompt + group_prompt)
     result = strip_format_quote(result)
     result = [l.strip() for l in result.split('\n') if l.strip()]
     result = [[j.strip() for j in i.split('|')] for i in result]
     return result
 
-
 def create_vocabulary(words, article):
     words = '\n'.join(words)
     prompt = f"""
-    对于 WORDS 中每一行的单词或短语，在 ARTICLE 的���下文语境中翻译。每个翻译输出一行，格式为
+    对于 WORDS 中每一行的单词或短语，在 ARTICLE 的上下文语境中翻译。每个翻译输出一行，格式为
     单词 | 音标 | 词性 | 中文翻译
 
     - 如果单词是动词，则将其转化为动词原形后再翻译输出。例如，加粗的单词为动词lingered，则转成linger。
@@ -401,8 +418,8 @@ def add_vocabulary_table(doc, vocabulary, title):
 
 def doc_to_vocabulary(input_file, output_file, title="Vocabulary"):
     doc = Document(input_file)
-    md_text = doc_to_markdown(doc)
-    vocabulary = create_vocabulary_from_markdown(md_text)
+    word_groups = doc_to_word_group(doc)
+    vocabulary = create_vocabulary_from_word_groups(word_groups)
 
     output_doc = Document("template.docx")
     title_paragraph = output_doc.paragraphs[0]
@@ -439,7 +456,12 @@ def test_images_to_doc():
     images_to_doc(["/Users/ryan/Downloads/IMG_5292.jpg"], "test_markdown.docx")
 
 def test_doc_to_vocabulary():
-    doc_to_vocabulary("test_doc_to_vocabulary.docx", "test_vocabulary.docx", "Test Vocabulary")
+    # doc = Document("tests/test_doc1.docx")
+    # groups = doc_to_word_group(doc)
+    # vocabulary = create_vocabulary_from_word_groups(groups)
+    # pprint(vocabulary)
+    doc_to_vocabulary("tests/test_doc1.docx", "test_vocabulary.docx", "Test Vocabulary")
+
 
 ### TESTS Textract ###
 def test_find_highlighted_regions():
@@ -468,6 +490,6 @@ if __name__ == "__main__":
     # test_extract_text_from_image()
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
-    test_extract_highlighted_words_from_image()
+    # test_extract_highlighted_words_from_image()
     # test_hightlighted_words_to_vocabulary()
-    # test_doc_to_vocabulary()
+    test_doc_to_vocabulary()
