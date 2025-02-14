@@ -180,7 +180,7 @@ def doc_to_vocabulary(app_state):
             st.image("doc_sample.jpg", width=600)
         else:
             st.markdown("### 输入单词本标题")
-            default_title = "单词本 - " + uploaded_doc.name.split('.')[0]
+            default_title = "单词本 - " + uploaded_doc.name.rsplit('.', 1)[0]
             title = st.text_input("Vocabulary Title", value=default_title, placeholder="请输入单词本的标题", label_visibility="collapsed")
             if st.button("根据文档中的高亮文本生成单词本", disabled=(not title)):
                 with st.spinner('正在生成单词本...'):
