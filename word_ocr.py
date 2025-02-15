@@ -17,7 +17,9 @@ from openai import OpenAI
 from joblib import Memory
 
 import imgutil
-from util import llm_completion, llm_image_completion, cache, generate_file_hash, strip_format_quote
+from util import cache, generate_file_hash, strip_format_quote
+from llm import llm_completion, llm_image_completion
+
 # ==== COMMON ====
 def preprocess_image(image_path_or_file):
     image_hash = generate_file_hash(image_path_or_file)
