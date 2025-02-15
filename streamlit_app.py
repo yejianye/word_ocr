@@ -240,6 +240,7 @@ def main():
         flow_type = st.radio(
             "选择上传类型",
             ("包含高亮单词的图片", "包含高亮单词的 Word 文件"),
+            index=1,
             horizontal=True,
             label_visibility="collapsed"
         )
