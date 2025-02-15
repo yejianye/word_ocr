@@ -52,7 +52,6 @@ def llm_completion(prompt: str, model: str = DEFAULT_MODEL):
         )
     else:
         client = OpenAI()
-
     completion = client.chat.completions.create(
         model = model,
         messages = [
