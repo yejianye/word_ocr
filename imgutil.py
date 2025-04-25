@@ -1,5 +1,4 @@
 import cv2
-import pytesseract
 
 import io
 import numpy as np
@@ -56,42 +55,37 @@ def resize_image(image, max_size=2000):
     
     return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
-def fix_image_orientation(image):    
-    # Run Tesseract to detect text orientation
-    osd = pytesseract.image_to_osd(image)
-    # Extract the rotation angle from Tesseract's OSD (Orientation and Script Detection)
-    rotation_angle = int(osd.split("\n")[2].split(":")[1].strip())
+# def fix_image_orientation(image):    
+#     # Run Tesseract to detect text orientation
+#     osd = pytesseract.image_to_osd(image)
+#     # Extract the rotation angle from Tesseract's OSD (Orientation and Script Detection)
+#     rotation_angle = int(osd.split("\n")[2].split(":")[1].strip())
 
-    # If the angle is 90, 180, or 270 degrees, rotate the image accordingly
-    if rotation_angle == 90:
-        corrected_image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-    elif rotation_angle == 180:
-        corrected_image = cv2.rotate(image, cv2.ROTATE_180)
-    elif rotation_angle == 270:
-        corrected_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    else:
-        # The image is already correctly oriented
-        corrected_image = image
-    return corrected_image
+#     # If the angle is 90, 180, or 270 degrees, rotate the image accordingly
+#     if rotation_angle == 90:
+#         corrected_image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+#     elif rotation_angle == 180:
+#         corrected_image = cv2.rotate(image, cv2.ROTATE_180)
+#     elif rotation_angle == 270:
+#         corrected_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+#     else:
+#         # The image is already correctly oriented
+#         corrected_image = image
+#     return corrected_image
 
 def preprocess_image(image_path_or_file, output_path_or_file):
     image = read_image(image_path_or_file)
     image = resize_image(image)
-    try:
-        image = fix_image_orientation(image)
-    except pytesseract.TesseractError as e:
-        print(f"Error detecting and fixing image orientation: {e}")
+    # try:
+    #     image = fix_image_orientation(image)
+    # except pytesseract.TesseractError as e:
+    #     print(f"Error detecting and fixing image orientation: {e}")
     write_image(image, output_path_or_file)
 
 def test_preprocess_image():
     image_path = "/Users/ryan/Downloads/IMG_5293.jpg"
     output_path = "/Users/ryan/Downloads/processed_image.jpg"
     preprocess_image(image_path, output_path)
-
-def test_image_to_osd():
-    image_path = "/Users/ryan/Downloads/IMG_5307.jpg"
-    image = read_image(image_path)
-    print(pytesseract.image_to_osd(image, config="-c min_characters_to_try=3"))
 
 if __name__ == "__main__":
     # test_preprocess_image()
