@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 import word_ocr
+from imgutil import fix_image_orientation
 
 class AppState:
     def __init__(self):
@@ -107,11 +108,12 @@ def image_to_vocabulary(app_state):
         uploaded_images = st.file_uploader("", accept_multiple_files=True, label_visibility="collapsed")
         if uploaded_images:
             uploaded_images.sort(key=lambda x: x.name)
+            uploaded_images = [fix_image_orientation(img) for img in uploaded_images]
             st.write("已上传的图片")
             cols = st.columns(3)            
             for i, uploaded_image in enumerate(uploaded_images):
                 with cols[i % 3]:
-                    st.image(uploaded_image, caption=f"Image {i + 1}", use_column_width=True)
+                    st.image(uploaded_image, caption=f"Image {i + 1}", use_container_width=True)
         else:
             st.write("图片样例")
             st.image("image_sample.jpg", width=600)
@@ -132,7 +134,7 @@ def image_to_vocabulary(app_state):
         st.markdown("### 编缉或添加单词短语（每行一个）")
         cols = st.columns([0.6, 0.4])
         with cols[0]:
-            st.image(image, caption=f"图片 {image_idx+1}", use_column_width=True)
+            st.image(image, caption=f"图片 {image_idx+1}", use_container_width=True)
         with cols[1]:
             height = len(highlighted_words) * 25 + 75
             st.text_area("", value='\n'.join(highlighted_words), height=height, key="hl_textarea", label_visibility="collapsed")
