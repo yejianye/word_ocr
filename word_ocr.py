@@ -13,6 +13,7 @@ import numpy as np
 
 from docx import Document
 from docx.shared import RGBColor, Pt
+from docx.oxml.ns import qn
 from openai import OpenAI
 from joblib import Memory
 
@@ -247,7 +248,7 @@ def extract_text_from_image(image_path_or_file):
 # # 输出要求
 # - 输出文本的换行与图中保持一致。
 # - 对于高亮文本进行加粗（左右两边各添加两个星号)。
-# - 如果高亮文��中包含逗号或是句号，则将标点符号两边的单词短语分别进行加粗。
+# - 如果高亮文本中包含逗号或是句号，则将标点符号两边的单词短语分别进行加粗。
 # - 对于其他文本，按原文输出，不添加任何标记。
 # - 不要输出除此以外的任何其他内容，如解释、注释等
 # - 在最终输出前，再次与原图进行比对，确保高亮文本的加粗符合要求，否则需要进行调整。例如：下划线的文本不应该加粗。
@@ -411,12 +412,44 @@ def create_vocabulary(words, article):
 
 def add_vocabulary_table(doc, vocabulary, title):
     table = doc.tables[0]
+    
+    # Get font properties from the first cell of the first row
+    first_cell = table.rows[0].cells[0]
+    first_run = first_cell.paragraphs[0].runs[0]
+    latin_font = first_run.font.name
+    font_size = first_run.font.size
+
+    # Get East Asian font from the first cell's run properties (rPr -> rFonts -> eastAsia)
+    east_asia_font = None
+    if hasattr(first_run._element, 'rPr'):
+        rPr = first_run._element.rPr
+        if rPr is not None:
+            ct_fonts = rPr.find(qn('w:rFonts'))
+            if ct_fonts is not None:
+                east_asia_font = ct_fonts.get(qn('w:eastAsia'))
 
     for word in vocabulary:
         row = table.add_row()
         row.height = Pt(20)
         for j, cell in enumerate(row.cells):
             cell.text = word[j] if j < len(word) else ""
+            
+            # Set cell alignment to center left
+            cell.paragraphs[0].alignment = 0  # 0 = WD_ALIGN_PARAGRAPH.LEFT
+            cell.vertical_alignment = 1  # 1 = WD_ALIGN_VERTICAL.CENTER
+            
+            # Apply font properties from first cell to all runs in the cell
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    # Set Latin font and size
+                    run.font.name = latin_font
+                    run.font.size = font_size
+
+                    # Set East Asian font if available
+                    if east_asia_font:
+                        rPr = run._element.get_or_add_rPr()
+                        ct_fonts = rPr.get_or_add_rFonts()
+                        ct_fonts.set(qn('w:eastAsia'), east_asia_font)
 
 def doc_to_vocabulary(input_file, output_file, title="Vocabulary"):
     doc = Document(input_file)
@@ -434,17 +467,17 @@ def doc_to_vocabulary(input_file, output_file, title="Vocabulary"):
 ### TESTS LLM ###
 def test_convert_markdown_to_docx():
     test_markdown = """
-Brenda Z. Guiberson wanted to be a jungle explorer when she was a child. Much of her childhood was spent swimming, watching birds and __salmon__, and searching for arrowheads near her home along the Columbia River in the state of Washington. After volunteering at her child’s school, Guiberson became interested in writing nature books for children. She says that she writes for the child in herself, the one who loves adventure, surprises, and learning new things—a jungle explorer in words.
+Brenda Z. Guiberson wanted to be a jungle explorer when she was a child. Much of her childhood was spent swimming, watching birds and __salmon__, and searching for arrowheads near her home along the Columbia River in the state of Washington. After volunteering at her child's school, Guiberson became interested in writing nature books for children. She says that she writes for the child in herself, the one who loves adventure, surprises, and learning new things—a jungle explorer in words.
 
 SETTING A PURPOSE As you read, pay attention to how earthquakes affect people, animals, the land, and the ocean, and think about how people explain and deal with the impact of these damaging events.
 
-Head for the Hills! It’s Earth Against Earth
+Head for the Hills! It's Earth Against Earth
 
 -----------------------------------------
 
-For centuries, a big __chunk__ of earth under the Indian Ocean known as the India plate has been __scraping__ against another chunk of earth, the Burma plate. At eight o’clock in the morning on December 26, 2004, this scraping reached a breaking point near the island of Sumatra in Indonesia. A 750-mile section of earth snapped and __popped__ up as a new __40-foot-high__ cliff. This created one of the biggest earthquakes ever, 9.2 to 9.3 on the Richter scale.1 At a hospital, oxygen tanks __tumbled__ and beds __lurched__. At a __mosque__, the dome crashed to the floor. On the street, athletes running a race fell
+For centuries, a big __chunk__ of earth under the Indian Ocean known as the India plate has been __scraping__ against another chunk of earth, the Burma plate. At eight o'clock in the morning on December 26, 2004, this scraping reached a breaking point near the island of Sumatra in Indonesia. A 750-mile section of earth snapped and __popped__ up as a new __40-foot-high__ cliff. This created one of the biggest earthquakes ever, 9.2 to 9.3 on the Richter scale.1 At a hospital, oxygen tanks __tumbled__ and beds __lurched__. At a __mosque__, the dome crashed to the floor. On the street, athletes running a race fell
 
-1 Richter scale (rĭk’tar): a scale ranging from 1 to 10 that expresses the amount of energy released by an earthquake; named after Charles Richter, an American seismologist.
+1 Richter scale (rĭk'tar): a scale ranging from 1 to 10 that expresses the amount of energy released by an earthquake; named after Charles Richter, an American seismologist.
 """
     doc = Document()
     add_markdown_to_docx(doc, test_markdown)
@@ -458,12 +491,7 @@ def test_images_to_doc():
     images_to_doc(["/Users/ryan/Downloads/IMG_5292.jpg"], "test_markdown.docx")
 
 def test_doc_to_vocabulary():
-    # doc = Document("tests/test_doc1.docx")
-    # groups = doc_to_word_group(doc)
-    # vocabulary = create_vocabulary_from_word_groups(groups)
-    # pprint(vocabulary)
     doc_to_vocabulary("tests/test_doc1.docx", "test_vocabulary.docx", "Test Vocabulary")
-
 
 ### TESTS Textract ###
 def test_find_highlighted_regions():
