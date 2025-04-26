@@ -495,6 +495,7 @@ def add_vocabulary_table(doc, vocabulary, title):
                     # Set Latin font and size
                     run.font.name = latin_font
                     run.font.size = font_size
+                    run.font.bold = False  # Ensure text is not bold
 
                     # Set East Asian font if available
                     if east_asia_font:
@@ -583,5 +584,6 @@ if __name__ == "__main__":
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
     # test_hightlighted_words_to_vocabulary()
-    test_extract_highlighted_words_from_image()
+    # test_extract_highlighted_words_from_image()
     # test_azure()
+    test_doc_to_vocabulary()
