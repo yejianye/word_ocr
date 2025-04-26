@@ -16,10 +16,18 @@ from docx.shared import RGBColor, Pt
 from docx.oxml.ns import qn
 from openai import OpenAI
 from joblib import Memory
+from dotenv import load_dotenv
 
 import imgutil
 from util import cache, generate_file_hash, strip_format_quote
 from llm import llm_completion, llm_image_completion
+
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.ai.documentintelligence.models import AnalyzeResult
+from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+from azure.core.credentials import AzureKeyCredential
+
+load_dotenv()
 
 # ==== COMMON ====
 def preprocess_image(image_path_or_file):
@@ -81,6 +89,46 @@ def sanitize_text(text):
         return match.group().strip()
     return None
 
+@cache
+def azure_doc_intel(image_path):
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    client = DocumentIntelligenceClient(
+        endpoint=os.getenv("AZURE_DOC_INTEL_ENDPOINT"),
+        credential=AzureKeyCredential(os.getenv("AZURE_DOC_INTEL_KEY")),
+    )
+    
+    request = AnalyzeDocumentRequest(
+        bytes_source=image_data
+    )
+    
+    poller = client.begin_analyze_document(
+        "prebuilt-layout",  # Use the prebuilt-layout model
+        request
+    )
+    return poller.result()
+    
+def polygon_to_bounding_box(polygon):
+    x_coords = [polygon[i] for i in range(0, len(polygon), 2)]
+    y_coords = [polygon[i+1] for i in range(0, len(polygon), 2)]
+    x_min = min(x_coords)
+    y_min = min(y_coords)
+    x_max = max(x_coords)
+    y_max = max(y_coords)
+    # Return (x, y, width, height) format for OpenCV
+    return (int(x_min), int(y_min), int(x_max - x_min), int(y_max - y_min))
+
+def get_text_with_azure(image_path):
+    result = azure_doc_intel(image_path)
+    words = result.pages[0].words
+    words = [
+        {'text': w.content,
+         'idx': idx,
+         'confidence': w.confidence,
+         'bounding_box': polygon_to_bounding_box(w.polygon)}
+        for idx, w in enumerate(words)
+    ]
+    return {'full_text': result.content, 'words': words}
 
 @cache
 def get_text_with_textract(image_path_or_image):
@@ -121,6 +169,9 @@ def get_text_with_textract(image_path_or_image):
                 'bounding_box': bounding_box
             })
             idx += 1
+
+    full_text = " ".join([w['text'] for w in words]) # Basic reconstruction
+
     return {'full_text': full_text, 'words': words}
 
 def merge_bounding_boxes(boxes):
@@ -182,8 +233,8 @@ def extract_highlighted_words_from_image(image_path_or_file, area_threshold=200)
     # Load the image using OpenCV
     debug_image = cv2.imread(processed_image)
     hl_regions = find_highlighted_regions(processed_image)
-    # Use pytesseract to get the bounding box information
-    result = get_text_with_textract(processed_image)
+    # result = get_text_with_textract(processed_image)
+    result = get_text_with_azure(processed_image)
     text_bounding_box = calculate_text_bounding_box(result['words'])
     # Filter out highlighted regions that are not inside the text bounding box
     hl_regions = filter_regions_outside_bounding_box(hl_regions, text_bounding_box)
@@ -500,12 +551,15 @@ def test_find_highlighted_regions():
     find_highlighted_regions(f"tests/test{i}_processed.jpg", output_path=f"tests/test{i}_highlighted.jpg")
 
 def test_extract_highlighted_words_from_image():
-    result = extract_highlighted_words_from_image("tests/walter2.jpg")
+    test_image_path = "tests/two_columns.jpg"
+    # test_image_path = "tests/test1.jpg"
+    result = extract_highlighted_words_from_image(test_image_path)
+
     print(result['highlighted_words'])
-    debug_image = cv2.imread(result['debug_image'])
-    cv2.imshow('Debug Image', debug_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # debug_image = cv2.imread(result['debug_image'])
+    # cv2.imshow('Debug Image', debug_image)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
 
 def test_hightlighted_words_to_vocabulary():
     result = extract_highlighted_words_from_image("tests/test1.jpg")
@@ -516,10 +570,18 @@ def test_hightlighted_words_to_vocabulary():
     vocabulary = create_vocabulary(result['highlighted_words'], result['full_text'])
     vocabulary_to_doc(vocabulary, "test_vocabulary.docx")
 
+
+def test_azure():
+    image_path = "tests/two_columns.jpg"
+    result = get_text_with_azure(image_path)
+    pprint(result['full_text'])
+    pprint(result['words'][:100])
+
+
 if __name__ == "__main__":
     # test_extract_text_from_image()
     # test_images_to_doc()
     # test_convert_markdown_to_docx()
-    # test_extract_highlighted_words_from_image()
     # test_hightlighted_words_to_vocabulary()
-    test_doc_to_vocabulary()
+    test_extract_highlighted_words_from_image()
+    # test_azure()
