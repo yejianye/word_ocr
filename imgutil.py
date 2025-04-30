@@ -58,8 +58,11 @@ def resize_image(image, max_size=2000):
     return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
 def fix_image_orientation(image):    
-    image = Image.open(image)# Correct orientation based on EXIF metadata
+    image = Image.open(image)  # Correct orientation based on EXIF metadata
     image = ImageOps.exif_transpose(image)
+    # Convert RGBA to RGB if necessary
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
     img_bytes = io.BytesIO()
     image.save(img_bytes, format='JPEG')  # or 'PNG' depending on your image format
     img_bytes.seek(0)  # Important: reset the cursor to the start
