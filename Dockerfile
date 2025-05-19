@@ -7,12 +7,12 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install binary dependencies
-COPY packages.txt .
-RUN apt-get update && \
-    xargs apt-get install -y < packages.txt && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm packages.txt
+## Install binary dependencies
+#COPY packages.txt .
+#RUN apt-get update && \
+#    xargs apt-get install -y < packages.txt && \
+#    rm -rf /var/lib/apt/lists/* && \
+#    rm packages.txt
 
 # Create and activate virtual environment
 RUN python -m venv /opt/venv
