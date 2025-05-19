@@ -105,7 +105,7 @@ def image_to_vocabulary(app_state):
 
     if stage == 'upload_file':
         st.markdown("### 上传包含高亮单词的图片（可上传多张）")
-        uploaded_images = st.file_uploader("", accept_multiple_files=True, label_visibility="collapsed")
+        uploaded_images = st.file_uploader("上传图片", accept_multiple_files=True, label_visibility="collapsed")
         if uploaded_images:
             uploaded_images.sort(key=lambda x: x.name)
             uploaded_images = [fix_image_orientation(img) for img in uploaded_images]
@@ -176,7 +176,7 @@ def doc_to_vocabulary(app_state):
     stage = app_state.stage
     if stage == 'upload_file':
         st.markdown("### 上传包含高亮单词的 Word 文件")
-        uploaded_doc = st.file_uploader("", label_visibility="collapsed")
+        uploaded_doc = st.file_uploader("上传 Word 文件", label_visibility="collapsed")
         if not uploaded_doc:
             st.write("文件样例")
             st.image("doc_sample.jpg", width=600)
